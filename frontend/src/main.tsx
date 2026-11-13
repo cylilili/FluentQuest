@@ -2,14 +2,18 @@ import { useEffect, useRef, useState } from 'react'
 import { createRoot } from 'react-dom/client'
 import {
   QuestApiError,
+  restoreSession,
   startSession,
   submitAnswer,
   type AnswerResult,
   type AnswerSubmission,
   type OptionId,
   type SessionProgress,
+  type SessionSnapshot,
+  type Stage,
 } from './questApi'
-import { sampleQuest, type Stage } from './sampleQuest'
+import { readSavedSession, saveSession, type SavedSession } from './questStorage'
+import { sampleQuest } from './sampleQuest'
 import './styles.css'
 
 type HealthState = 'loading' | 'ok' | 'error'
@@ -96,6 +100,12 @@ function App() {
   const [answers, setAnswers] = useState<Partial<Record<string, OptionId>>>({})
   const [results, setResults] = useState<Partial<Record<string, AnswerResult>>>({})
   const [progress, setProgress] = useState<SessionProgress | null>(null)
+  const [article, setArticle] = useState<SessionSnapshot['article'] | null>(null)
+  const [sessionToRestore, setSessionToRestore] = useState(readSavedSession)
+  const [restoreState, setRestoreState] = useState<'idle' | 'loading' | 'error'>(
+    sessionToRestore ? 'loading' : 'idle',
+  )
+  const [restoreAttempt, setRestoreAttempt] = useState(0)
   const [pending, setPending] = useState<AnswerSubmission | null>(null)
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [submissionError, setSubmissionError] = useState<{
@@ -107,7 +117,7 @@ function App() {
   const stageHeading = useRef<HTMLHeadingElement>(null)
   const focusStage = useRef(false)
 
-  const { stages } = sampleQuest
+  const { title, source, stages } = article ?? sampleQuest
   const currentStage = stages[stageIndex]
   const isLastStage = stageIndex === stages.length - 1
 
@@ -124,6 +134,7 @@ function App() {
     const selected = answers[stageId]
     if (
       submissionInFlight.current ||
+      restoreState !== 'idle' ||
       sessionExpired ||
       !selected ||
       results[stageId]?.challenge_completed ||
@@ -135,6 +146,7 @@ function App() {
     submissionInFlight.current = true
     setIsSubmitting(true)
     setSubmissionError(null)
+    let session = progress
 
     try {
       const submission = pending ?? {
@@ -143,8 +155,9 @@ function App() {
         request_id: crypto.randomUUID(),
       }
       setPending(submission)
-      const session = progress ?? await startSession()
+      session ??= await startSession()
       setProgress(session)
+      saveSession({ sessionId: session.session_id, pending: submission })
 
       const result = await submitAnswer(session.session_id, submission)
       setProgress(result)
@@ -153,6 +166,7 @@ function App() {
         setAnswers((previous) => ({ ...previous, [stageId]: undefined }))
       }
       setPending(null)
+      saveSession({ sessionId: session.session_id, pending: null })
     } catch (error) {
       if (
         error instanceof QuestApiError &&
@@ -161,6 +175,7 @@ function App() {
       ) {
         setSessionExpired(true)
         setPending(null)
+        saveSession(null)
       } else if (
         error instanceof QuestApiError &&
         error.status >= 400 &&
@@ -168,6 +183,7 @@ function App() {
         error.status !== 408
       ) {
         setPending(null)
+        if (session) saveSession({ sessionId: session.session_id, pending: null })
         setSubmissionError({ stageId, message: error.message })
       } else {
         setSubmissionError({
@@ -182,9 +198,13 @@ function App() {
   }
 
   function restartQuest() {
+    saveSession(null)
+    setSessionToRestore(null)
+    setRestoreState('idle')
     setAnswers({})
     setResults({})
     setProgress(null)
+    setArticle(null)
     setPending(null)
     setSubmissionError(null)
     setSessionExpired(false)
@@ -200,7 +220,7 @@ function App() {
         selected={answers[stage.id]}
         result={results[stage.id]}
         error={submissionError?.stageId === stage.id ? submissionError.message : undefined}
-        disabled={isSubmitting || sessionExpired || (pending !== null && !isPendingStage)}
+        disabled={restoreState !== 'idle' || isSubmitting || sessionExpired || (pending !== null && !isPendingStage)}
         submitting={isSubmitting && isPendingStage}
         retrying={isPendingStage}
         onSelect={(option) => selectAnswer(stage.id, option)}
@@ -208,6 +228,71 @@ function App() {
       />
     )
   }
+
+  useEffect(() => {
+    if (!sessionToRestore) return
+
+    let cancelled = false
+
+    async function recover(saved: SavedSession) {
+      try {
+        const snapshot = await restoreSession(saved.sessionId)
+        if (cancelled) return
+
+        const restoredResults: Partial<Record<string, AnswerResult>> = {}
+        const restoredAnswers: Partial<Record<string, OptionId>> = {}
+        for (const answer of snapshot.answers) {
+          const previous = restoredResults[answer.challenge_id]
+          if (previous && previous.attempt_number >= answer.attempt_number) continue
+          restoredResults[answer.challenge_id] = answer
+          restoredAnswers[answer.challenge_id] = answer.challenge_completed
+            ? answer.selected_option_id
+            : undefined
+        }
+
+        const firstUnfinished = snapshot.article.stages.findIndex(
+          (stage) => !restoredResults[stage.id]?.challenge_completed,
+        )
+        const submission = saved.pending
+        const pendingStage = snapshot.article.stages.findIndex(
+          (stage) => stage.id === submission?.challenge_id,
+        )
+        const retry = submission && pendingStage >= 0
+          && !restoredResults[submission.challenge_id]?.challenge_completed
+          && !snapshot.answers.some((answer) => answer.request_id === submission.request_id)
+          ? submission
+          : null
+
+        if (retry) {
+          restoredAnswers[retry.challenge_id] = retry.selected_option_id
+          if (pendingStage !== firstUnfinished) setMode('full')
+        }
+
+        setArticle(snapshot.article)
+        setProgress(snapshot)
+        setResults(restoredResults)
+        setAnswers(restoredAnswers)
+        setPending(retry)
+        setStageIndex(firstUnfinished < 0 ? snapshot.article.stages.length : firstUnfinished)
+        saveSession({ sessionId: snapshot.session_id, pending: retry })
+        setRestoreState('idle')
+        setSessionToRestore(null)
+      } catch (error) {
+        if (cancelled) return
+        if (error instanceof QuestApiError && (error.status === 404 || error.status === 422)) {
+          saveSession(null)
+          setSessionToRestore(null)
+          setSessionExpired(true)
+          setRestoreState('idle')
+        } else {
+          setRestoreState('error')
+        }
+      }
+    }
+
+    void recover(sessionToRestore)
+    return () => { cancelled = true }
+  }, [sessionToRestore, restoreAttempt])
 
   useEffect(() => {
     if (focusStage.current) {
@@ -260,7 +345,7 @@ function App() {
           Reading mode
           <select
             value={mode}
-            disabled={pending !== null || isSubmitting}
+            disabled={restoreState !== 'idle' || pending !== null || isSubmitting}
             onChange={(event) => setMode(event.currentTarget.value === 'full' ? 'full' : 'guided')}
           >
             <option value="guided">Guided Quest</option>
@@ -269,7 +354,21 @@ function App() {
         </label>
       </header>
       <main className="quest-content">
-        <h1>{sampleQuest.title}</h1>
+        <h1>{title}</h1>
+        {restoreState === 'loading' && <p role="status">Restoring your quest…</p>}
+        {restoreState === 'error' && (
+          <div className="quest-restart">
+            <p role="alert">Could not restore your quest. Check the backend connection and try again.</p>
+            <div className="stage-actions">
+              <button type="button" onClick={() => {
+                setRestoreState('loading')
+                setRestoreAttempt((attempt) => attempt + 1)
+              }}>
+                Retry restore
+              </button>
+            </div>
+          </div>
+        )}
         <div className="quest-progress">
           <label htmlFor="quest-progress">
             {progress?.completed_stages ?? 0} / {progress?.total_stages ?? stages.length} stages complete
@@ -350,7 +449,7 @@ function App() {
         )}
       </main>
       <footer className="site-footer">
-        <p>Adapted from <a href={sampleQuest.source.url}>{sampleQuest.source.label}</a>.</p>
+        <p>Adapted from <a href={source.url}>{source.label}</a>.</p>
         <p role="status">{healthMessages[health]}</p>
       </footer>
     </div>

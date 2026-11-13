@@ -1,5 +1,16 @@
 export type OptionId = 'A' | 'B' | 'C'
 
+export type Stage = {
+  id: string
+  title: string
+  passage: string
+  question: {
+    title: string
+    prompt: string
+    options: { id: OptionId; text: string }[]
+  }
+}
+
 export type SessionProgress = {
   session_id: string
   xp: number
@@ -15,11 +26,23 @@ export type AnswerSubmission = {
 }
 
 export type AnswerResult = SessionProgress & {
+  challenge_id: string
+  attempt_number: number
   correct: boolean
   retry_allowed: boolean
   challenge_completed: boolean
   xp_awarded: number
   feedback: string
+}
+
+export type SessionSnapshot = SessionProgress & {
+  article: {
+    id: string
+    title: string
+    source: { label: string; url: string }
+    stages: Stage[]
+  }
+  answers: (AnswerResult & { selected_option_id: OptionId; request_id: string })[]
 }
 
 export class QuestApiError extends Error {
@@ -28,11 +51,9 @@ export class QuestApiError extends Error {
   }
 }
 
-async function post<T>(path: string, body?: AnswerSubmission): Promise<T> {
+async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   const response = await fetch(path, {
-    method: 'POST',
-    headers: body ? { 'Content-Type': 'application/json' } : undefined,
-    body: body ? JSON.stringify(body) : undefined,
+    ...options,
     signal: AbortSignal.timeout(10_000),
   })
 
@@ -46,9 +67,19 @@ async function post<T>(path: string, body?: AnswerSubmission): Promise<T> {
 }
 
 export function startSession() {
-  return post<SessionProgress>('/api/sessions')
+  return request<SessionProgress>('/api/sessions', { method: 'POST' })
+}
+
+export function restoreSession(sessionId: string) {
+  return request<SessionSnapshot>(`/api/sessions/${encodeURIComponent(sessionId)}`, {
+    cache: 'no-store',
+  })
 }
 
 export function submitAnswer(sessionId: string, submission: AnswerSubmission) {
-  return post<AnswerResult>(`/api/sessions/${sessionId}/answers`, submission)
+  return request<AnswerResult>(`/api/sessions/${sessionId}/answers`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(submission),
+  })
 }

@@ -1,13 +1,4 @@
-import type { OptionId } from './questApi'
-
-type Option = { id: OptionId; text: string }
-
-export type Stage = {
-  id: string
-  title: string
-  passage: string
-  question: { title: string; prompt: string; options: Option[] }
-}
+import type { Stage } from './questApi'
 
 export const sampleQuest = {
   title: 'Venus and Adonis',
