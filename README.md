@@ -1,6 +1,6 @@
 # Reading Quest
 
-Reading Quest is an English reading game in development. Try *Venus and Adonis* or generate three challenges from your own article. Use the **Reading mode** menu to switch to the full article.
+Reading Quest is an English reading game. Play three challenges in *Venus and Adonis* or use Gemini to generate a quest from your own article.
 
 ## Setup
 
@@ -24,6 +24,8 @@ npm --prefix frontend ci --registry=https://registry.npmjs.org
 npm --prefix frontend run dev
 ```
 
+Open [Reading Quest](http://127.0.0.1:5173/). The built-in quest works without a Gemini API key and uses standard answer feedback. Set `GEMINI_API_KEY` before starting FastAPI to enable article generation and Tutor tool calls.
+
 ## Verify
 
 1. Open [Reading Quest](http://127.0.0.1:5173/). Select an answer and click **Check answer**. A correct answer awards 10 XP. Two wrong answers finish the stage with an explanation and 0 XP.
@@ -37,13 +39,19 @@ Answer one stage, then reload in the same browser. The quest should resume at th
 
 ### Generate a quest
 
-Set `GEMINI_API_KEY` in the backend terminal before starting FastAPI. The default model is `gemini-3.5-flash-lite`. Set `GEMINI_MODEL` to choose a Gemini model that supports structured output and function calling.
+The default model is `gemini-3.5-flash-lite`. Set `GEMINI_MODEL` to choose a Gemini model that supports structured output and function calling.
 
 On the reading page, select **Use my own article**, paste 300–800 English words, and click **Generate quest**. Gemini receives the article text to generate the questions. Complete a stage and reload to check that the generated quest and its progress resume.
 
 ### Verify the tutor
 
-With Gemini configured, start a fresh quest and answer the first question incorrectly. Gemini receives the question's skill and attempt number. In the browser's **Network** panel, open the answer response. `agent_action: "GIVE_HINT"` confirms LangGraph ran the hint tool. `"RETRY"` shows the standard retry prompt. Both actions allow one more attempt.
+With Gemini configured, start a fresh quest and answer the first question incorrectly. In the browser's **Network** panel, open **answers → Response** and look for `agent_trace`.
+
+- `input_state` shows what the tutor received after grading. `nodes` lists the LangGraph nodes that ran.
+- `offered_tool` and `requested_tool` show which tool the model could call and which recognized tool it requested. `reason` records the validation result or fallback, such as `invalid_tool_call` or `provider_timeout`.
+- `action` shows the graph's decision. If `applied` is false, another submission changed the state while the graph ran. The top-level `agent_action` shows the saved action.
+
+Submit another wrong answer to check the simpler example. The session response also includes saved traces. Answers recorded before tracing show `agent_trace: null`.
 
 ### Run backend tests
 

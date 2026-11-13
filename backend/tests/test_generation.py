@@ -94,7 +94,13 @@ class GenerationTests(unittest.IsolatedAsyncioTestCase):
                 "request_id": stage["id"],
             })
             self.assertEqual(result.status_code, 200)
-            self.assertTrue(result.json()["correct"])
+            answer = result.json()
+            self.assertTrue(answer["correct"])
+            trace = answer["agent_trace"]
+            self.assertEqual(trace["reason"], "correct_answer")
+            self.assertEqual(trace["nodes"], ["choose_action"])
+            self.assertIsNone(trace["offered_tool"])
+            self.assertEqual(trace["action"], answer["agent_action"])
         saved = (await self.client.get(url)).json()
         self.assertTrue(saved["session_completed"])
         self.assertEqual(saved["xp"], 30)
@@ -116,6 +122,14 @@ class GenerationTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("connects the details", answer["feedback"])
         self.assertEqual(answer["xp"], 0)
         self.assertTrue(answer["retry_allowed"])
+        trace = answer["agent_trace"]
+        self.assertEqual(trace["nodes"], ["choose_action", "give_hint"])
+        self.assertEqual(trace["offered_tool"], "give_hint")
+        self.assertEqual(trace["requested_tool"], "give_hint")
+        self.assertEqual(trace["reason"], "tool_accepted")
+        self.assertEqual(trace["input_state"]["attempt_number"], 1)
+        self.assertFalse(trace["input_state"]["correct"])
+        self.assertTrue(trace["applied"])
         replay = await self.client.post(f"{url}/answers", json=submission)
         self.assertEqual(replay.json(), answer)
         self.assertEqual(self.provider.tool_calls, 1)
@@ -136,6 +150,7 @@ class GenerationTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(saved), 2)
         self.assertEqual(saved[0]["agent_action"], "GIVE_HINT")
         self.assertEqual(saved[0]["feedback"], answer["feedback"])
+        self.assertEqual(saved[0]["agent_trace"], trace)
 
     async def test_repeated_miss_on_final_stage_shows_an_example_and_completes_the_quest(self):
         created = await self.client.post("/api/articles", json={"text": ARTICLE})
@@ -163,6 +178,11 @@ class GenerationTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(second.status_code, 200)
             result = second.json()
             self.assertEqual(result["agent_action"], "SIMPLIFY")
+            trace = result["agent_trace"]
+            self.assertEqual(trace["nodes"], ["choose_action", "show_simpler_example"])
+            self.assertEqual(trace["requested_tool"], "show_simpler_example")
+            self.assertEqual(trace["input_state"]["attempt_number"], 2)
+            self.assertFalse(trace["input_state"]["retry_allowed"])
             self.assertEqual(model.call_args.kwargs["tool_name"], "show_simpler_example")
             self.assertIn("The passage says the city opened a library.", result["feedback"])
             self.assertIn("Simpler example\n", result["feedback"])
@@ -179,6 +199,7 @@ class GenerationTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(model.call_count, 2)
 
         restored = (await self.client.get(url)).json()
+        self.assertEqual(len(restored["answers"]), 4)
         saved = next(answer for answer in restored["answers"] if answer["request_id"] == "miss-2")
         self.assertEqual(saved["feedback"], result["feedback"])
         self.assertEqual(saved["agent_action"], "SIMPLIFY")
@@ -231,12 +252,12 @@ class GenerationTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.provider.calls, 1)
 
     async def test_invalid_tool_calls_and_provider_failure_fall_back_to_retry(self):
-        for call in (
-            None,
-            ToolCall("complete", {"skill": "Main Idea"}),
-            ToolCall("give_hint", {"description": "Give a hint"}),
-            ToolCall("give_hint", {"skill": "Sentence Puzzle"}),
-            ProviderTimeout("Timed out"),
+        for call, reason, requested_tool in (
+            (None, "no_tool_call", None),
+            (ToolCall("complete", {"skill": "Main Idea"}), "invalid_tool_call", None),
+            (ToolCall("give_hint", {"description": "Give a hint"}), "invalid_tool_call", "give_hint"),
+            (ToolCall("give_hint", {"skill": "Sentence Puzzle"}), "invalid_tool_call", "give_hint"),
+            (ProviderTimeout("Timed out"), "provider_timeout", None),
         ):
             with self.subTest(call=call):
                 session = (await self.client.post("/api/sessions")).json()
@@ -247,8 +268,14 @@ class GenerationTests(unittest.IsolatedAsyncioTestCase):
                               "request_id": "first-attempt"},
                     )
                 self.assertEqual(response.status_code, 200)
-                self.assertEqual(response.json()["agent_action"], "RETRY")
-                self.assertTrue(response.json()["retry_allowed"])
+                answer = response.json()
+                self.assertEqual(answer["agent_action"], "RETRY")
+                self.assertTrue(answer["retry_allowed"])
+                trace = answer["agent_trace"]
+                self.assertEqual(trace["reason"], reason)
+                self.assertEqual(trace["offered_tool"], "give_hint")
+                self.assertEqual(trace["requested_tool"], requested_tool)
+                self.assertEqual(trace["nodes"], ["choose_action"])
 
     async def test_concurrent_attempt_discards_a_hint_based_on_stale_state(self):
         session = (await self.client.post("/api/sessions")).json()
@@ -274,8 +301,36 @@ class GenerationTests(unittest.IsolatedAsyncioTestCase):
         answer = response.json()
         self.assertEqual(answer["attempt_number"], 2)
         self.assertEqual(answer["agent_action"], "NEXT_CHALLENGE")
+        trace = answer["agent_trace"]
+        self.assertEqual(trace["action"], "GIVE_HINT")
+        self.assertEqual(trace["input_state"]["attempt_number"], 1)
+        self.assertFalse(trace["applied"])
         self.assertFalse(answer["retry_allowed"])
         self.assertEqual(answer["completed_stages"], 1)
+
+    async def test_answers_saved_before_tracing_can_still_be_restored_and_replayed(self):
+        session = (await self.client.post("/api/sessions")).json()
+        url = f"/api/sessions/{session['session_id']}"
+        submission = {
+            "challenge_id": "the-warning", "selected_option_id": "B", "request_id": "old-answer",
+        }
+        first = await self.client.post(f"{url}/answers", json=submission)
+        self.assertEqual(first.status_code, 200)
+        legacy = first.json()
+        del legacy["agent_trace"]
+        with db.transaction(write=True) as connection:
+            connection.execute(
+                db.submissions.update()
+                .where(db.submissions.c.session_id == session["session_id"])
+                .values(result=legacy)
+            )
+
+        restored = await self.client.get(url)
+        self.assertEqual(restored.status_code, 200)
+        self.assertIsNone(restored.json()["answers"][0]["agent_trace"])
+        replay = await self.client.post(f"{url}/answers", json=submission)
+        self.assertEqual(replay.status_code, 200)
+        self.assertEqual(replay.json(), {**legacy, "agent_trace": None})
 
     async def test_short_article_is_rejected_before_model_call(self):
         response = await self.client.post("/api/articles", json={"text": "Too short."})

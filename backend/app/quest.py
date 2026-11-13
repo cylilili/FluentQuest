@@ -8,8 +8,8 @@ from sqlalchemy.engine import Connection
 
 from .db import SAMPLE_ARTICLE_ID, articles, challenges, sessions, submissions, transaction
 from .llm import LLMProvider
-from .tutor import TutorAction, TutorState, resolve_tutor_action
-from .tutor_graph import TutorDecision, run_tutor
+from .tutor import TutorAction, TutorState, TutorTrace, resolve_tutor_action
+from .tutor_graph import run_tutor
 
 OptionId = Literal["A", "B", "C"]
 MAX_ATTEMPTS = 2
@@ -41,6 +41,7 @@ class AnswerResult(SessionProgress):
     xp_awarded: int
     feedback: str
     agent_action: TutorAction | None = None
+    agent_trace: TutorTrace | None = None
 
 
 class SubmittedAnswer(AnswerResult):
@@ -307,12 +308,12 @@ def submit_answer(
 
         # Another submission may have changed the attempt or progress during the model call.
         challenge_id, current_state, result = grade_answer(connection, session_id, submission)
-        if current_state != state:
-            decision = TutorDecision(action=resolve_tutor_action(current_state, None))
-        result.agent_action = decision.action
-        if decision.action == TutorAction.SIMPLIFY and decision.feedback is not None:
+        applied = current_state == state
+        result.agent_trace = decision.trace.model_copy(update={"applied": applied})
+        result.agent_action = decision.trace.action if applied else resolve_tutor_action(current_state, None)
+        if applied and result.agent_action == TutorAction.SIMPLIFY and decision.feedback is not None:
             result.feedback += f"\n\nSimpler example\n{decision.feedback}"
-        elif decision.feedback is not None:
+        elif applied and decision.feedback is not None:
             result.feedback = decision.feedback
 
         connection.execute(

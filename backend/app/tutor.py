@@ -1,5 +1,7 @@
 from enum import StrEnum
-from typing import TypedDict
+from typing import Literal, TypedDict
+
+from pydantic import BaseModel
 
 
 class TutorAction(StrEnum):
@@ -21,6 +23,29 @@ class TutorState(TypedDict):
     correct: bool
     retry_allowed: bool
     session_completed: bool
+
+
+TutorTool = Literal["give_hint", "show_simpler_example"]
+TutorReason = Literal[
+    "correct_answer",
+    "no_available_tool",
+    "tool_accepted",
+    "no_tool_call",
+    "invalid_tool_call",
+    "provider_timeout",
+    "provider_unavailable",
+    "invalid_provider_response",
+]
+
+
+class TutorTrace(BaseModel):
+    input_state: TutorState
+    nodes: list[Literal["choose_action", "give_hint", "show_simpler_example"]]
+    offered_tool: TutorTool | None
+    requested_tool: TutorTool | None
+    reason: TutorReason
+    action: TutorAction
+    applied: bool = True
 
 
 def allowed_tutor_actions(state: TutorState) -> tuple[TutorAction, ...]:

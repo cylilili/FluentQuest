@@ -7,7 +7,15 @@ from langgraph.graph import END, START, StateGraph
 from langgraph.runtime import Runtime
 
 from .llm import LLMProvider, ProviderResponseError, ProviderTimeout, ProviderUnavailable
-from .tutor import TutorAction, TutorState, allowed_tutor_actions, resolve_tutor_action
+from .tutor import (
+    TutorAction,
+    TutorReason,
+    TutorState,
+    TutorTool,
+    TutorTrace,
+    allowed_tutor_actions,
+    resolve_tutor_action,
+)
 
 
 logger = logging.getLogger(__name__)
@@ -38,6 +46,10 @@ class TutorGraphState(TypedDict):
     answer: TutorState
     action: NotRequired[TutorAction]
     feedback: NotRequired[str]
+    reason: NotRequired[TutorReason]
+    offered_tool: NotRequired[TutorTool]
+    requested_tool: NotRequired[TutorTool | None]
+    executed_tool: NotRequired[TutorTool]
 
 
 @dataclass(frozen=True)
@@ -47,7 +59,7 @@ class TutorContext:
 
 @dataclass(frozen=True)
 class TutorDecision:
-    action: TutorAction
+    trace: TutorTrace
     feedback: str | None = None
 
 
@@ -64,9 +76,14 @@ def choose_action(state: TutorGraphState, runtime: Runtime[TutorContext]) -> dic
         tool_name = SIMPLIFY_TOOL
         tool_description = "Show a simpler worked example of the same reading skill after the final miss."
     else:
-        return {"action": actions[0]}
+        return {
+            "action": actions[0],
+            "reason": "correct_answer" if answer["correct"] else "no_available_tool",
+        }
 
     proposed = None
+    requested_tool = None
+    reason: TutorReason
     try:
         call = runtime.context.provider.request_tool_call(
             instructions=(
@@ -95,16 +112,37 @@ def choose_action(state: TutorGraphState, runtime: Runtime[TutorContext]) -> dic
         )
     except (ProviderUnavailable, ProviderTimeout, ProviderResponseError) as exc:
         logger.warning("Tutor used %s because the provider failed (%s): %s", actions[0], type(exc).__name__, exc)
+        if isinstance(exc, ProviderTimeout):
+            reason = "provider_timeout"
+        elif isinstance(exc, ProviderResponseError):
+            reason = "invalid_provider_response"
+        else:
+            reason = "provider_unavailable"
     else:
-        if call is not None and call.name == tool_name and call.arguments == {"skill": skill}:
+        if call is None:
+            reason = "no_tool_call"
+        elif call.name == tool_name and call.arguments == {"skill": skill}:
             proposed = action
-        elif call is not None:
+            reason = "tool_accepted"
+        else:
+            reason = "invalid_tool_call"
             logger.warning("Tutor used %s because the tool name or arguments were invalid", actions[0])
-    return {"action": resolve_tutor_action(answer, proposed)}
+
+        # Record recognized names only. Model output can contain arbitrary strings.
+        if call is not None and call.name in (HINT_TOOL, SIMPLIFY_TOOL):
+            requested_tool = call.name
+
+    return {
+        "action": resolve_tutor_action(answer, proposed),
+        "reason": reason,
+        "offered_tool": tool_name,
+        "requested_tool": requested_tool,
+    }
 
 
 def give_hint(state: TutorGraphState) -> dict:
     return {
+        "executed_tool": HINT_TOOL,
         "feedback": HINTS.get(
             state["answer"]["skill_tag"],
             "Reread the passage and look for a detail that supports your choice.",
@@ -113,7 +151,10 @@ def give_hint(state: TutorGraphState) -> dict:
 
 
 def show_simpler_example(state: TutorGraphState) -> dict:
-    return {"feedback": SIMPLER_EXAMPLES[state["answer"]["skill_tag"]]}
+    return {
+        "executed_tool": SIMPLIFY_TOOL,
+        "feedback": SIMPLER_EXAMPLES[state["answer"]["skill_tag"]],
+    }
 
 
 def route_action(state: TutorGraphState) -> Literal["give_hint", "show_simpler_example", "__end__"]:
@@ -139,4 +180,16 @@ tutor_graph = (
 
 def run_tutor(answer: TutorState, provider: LLMProvider) -> TutorDecision:
     result = tutor_graph.invoke({"answer": answer}, context=TutorContext(provider))
-    return TutorDecision(action=result["action"], feedback=result.get("feedback"))
+    executed_tool = result.get("executed_tool")
+    nodes = ["choose_action"]
+    if executed_tool is not None:
+        nodes.append(executed_tool)
+    trace = TutorTrace(
+        input_state=answer,
+        nodes=nodes,
+        offered_tool=result.get("offered_tool"),
+        requested_tool=result.get("requested_tool"),
+        reason=result["reason"],
+        action=result["action"],
+    )
+    return TutorDecision(trace=trace, feedback=result.get("feedback"))
