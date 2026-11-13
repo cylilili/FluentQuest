@@ -33,15 +33,24 @@ export type AnswerResult = SessionProgress & {
   challenge_completed: boolean
   xp_awarded: number
   feedback: string
+  agent_action: 'GIVE_HINT' | 'SIMPLIFY' | 'RETRY' | 'NEXT_CHALLENGE' | 'COMPLETE' | null
+}
+
+export type ArticleListItem = {
+  id: string
+  title: string
+  built_in: boolean
+}
+
+export type QuestArticle = {
+  id: string
+  title: string
+  source: { label: string; url: string } | null
+  stages: Stage[]
 }
 
 export type SessionSnapshot = SessionProgress & {
-  article: {
-    id: string
-    title: string
-    source: { label: string; url: string } | null
-    stages: Stage[]
-  }
+  article: QuestArticle
   answers: (AnswerResult & { selected_option_id: OptionId; request_id: string })[]
 }
 
@@ -74,6 +83,14 @@ export function createArticle(text: string, title: string) {
   }, 60_000)
 }
 
+export function listArticles() {
+  return request<ArticleListItem[]>('/api/articles', { cache: 'no-store' })
+}
+
+export function getArticle(articleId: string) {
+  return request<QuestArticle>(`/api/articles/${encodeURIComponent(articleId)}`)
+}
+
 export function startSession(articleId?: string) {
   return request<SessionProgress>('/api/sessions', {
     method: 'POST',
@@ -95,5 +112,5 @@ export function submitAnswer(sessionId: string, submission: AnswerSubmission) {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(submission),
-  })
+  }, 20_000)
 }

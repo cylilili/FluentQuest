@@ -17,10 +17,14 @@ from .llm import (
 from .quest import (
     AnswerResult,
     AnswerSubmission,
+    ArticleListItem,
+    QuestArticle,
     SessionProgress,
     SessionSnapshot,
     create_session,
+    get_article,
     get_session,
+    list_articles,
     submit_answer,
 )
 
@@ -52,6 +56,16 @@ def start_session(submission: SessionStart | None = None) -> SessionProgress:
     return create_session(submission.article_id if submission else SAMPLE_ARTICLE_ID)
 
 
+@app.get("/api/articles")
+def article_list() -> list[ArticleListItem]:
+    return list_articles()
+
+
+@app.get("/api/articles/{article_id}")
+def article_detail(article_id: str) -> QuestArticle:
+    return get_article(article_id)
+
+
 @app.post("/api/articles", status_code=status.HTTP_201_CREATED)
 def create_article(
     submission: ArticleSubmission,
@@ -74,5 +88,9 @@ def restore_session(session_id: UUID) -> SessionSnapshot:
 
 
 @app.post("/api/sessions/{session_id}/answers")
-def answer_challenge(session_id: UUID, submission: AnswerSubmission) -> AnswerResult:
-    return submit_answer(session_id, submission)
+def answer_challenge(
+    session_id: UUID,
+    submission: AnswerSubmission,
+    provider: Annotated[LLMProvider, Depends(get_llm_provider)],
+) -> AnswerResult:
+    return submit_answer(session_id, submission, provider)

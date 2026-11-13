@@ -1,6 +1,7 @@
 import type { Stage } from './questApi'
 
 export const sampleQuest = {
+  id: 'venus-and-adonis-v1',
   title: 'Venus and Adonis',
   source: {
     label: 'Thomas Bulfinch, The Age of Fable',

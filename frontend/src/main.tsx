@@ -1,7 +1,9 @@
 import { useEffect, useRef, useState } from 'react'
 import { createRoot } from 'react-dom/client'
 import { ArticleForm } from './ArticleForm'
+import { ArticleLibrary } from './ArticleLibrary'
 import {
+  getArticle,
   QuestApiError,
   restoreSession,
   startSession,
@@ -103,6 +105,9 @@ function App() {
   const [progress, setProgress] = useState<SessionProgress | null>(null)
   const [article, setArticle] = useState<SessionSnapshot['article'] | null>(null)
   const [showArticleForm, setShowArticleForm] = useState(false)
+  const [showLibrary, setShowLibrary] = useState(false)
+  const [isStartingQuest, setIsStartingQuest] = useState(false)
+  const [questStartError, setQuestStartError] = useState<string | null>(null)
   const [sessionToRestore, setSessionToRestore] = useState(readSavedSession)
   const [restoreState, setRestoreState] = useState<'idle' | 'loading' | 'error'>(
     sessionToRestore ? 'loading' : 'idle',
@@ -119,7 +124,7 @@ function App() {
   const stageHeading = useRef<HTMLHeadingElement>(null)
   const focusStage = useRef(false)
 
-  const { title, source, stages } = article ?? sampleQuest
+  const { id: articleId, title, source, stages } = article ?? sampleQuest
   const currentStage = stages[stageIndex]
   const isLastStage = stageIndex === stages.length - 1
 
@@ -199,27 +204,39 @@ function App() {
     }
   }
 
-  function restartQuest() {
-    saveSession(null)
+  function openQuest(snapshot: SessionSnapshot) {
     setSessionToRestore(null)
     setRestoreState('idle')
     setAnswers({})
     setResults({})
-    setProgress(null)
-    setArticle(null)
+    setProgress(snapshot)
+    setArticle(snapshot.article)
     setPending(null)
     setSubmissionError(null)
     setSessionExpired(false)
-    if (stageIndex !== 0) goToStage(0)
-  }
-
-  function openGeneratedQuest(snapshot: SessionSnapshot) {
-    restartQuest()
-    setArticle(snapshot.article)
-    setProgress(snapshot)
+    goToStage(0)
     setMode('guided')
     saveSession({ sessionId: snapshot.session_id, pending: null })
     setShowArticleForm(false)
+    setShowLibrary(false)
+    setQuestStartError(null)
+  }
+
+  async function startNewQuest(id: string) {
+    if (isStartingQuest || submissionInFlight.current) return
+    setIsStartingQuest(true)
+    setQuestStartError(null)
+    try {
+      const nextArticle = await getArticle(id)
+      const session = await startSession(id)
+      openQuest({ ...session, article: nextArticle, answers: [] })
+    } catch (error) {
+      setQuestStartError(error instanceof QuestApiError
+        ? error.message
+        : 'Could not start the quiz. Check the backend connection and try again.')
+    } finally {
+      setIsStartingQuest(false)
+    }
   }
 
   function renderQuestion(stage: Stage) {
@@ -231,7 +248,8 @@ function App() {
         selected={answers[stage.id]}
         result={results[stage.id]}
         error={submissionError?.stageId === stage.id ? submissionError.message : undefined}
-        disabled={restoreState !== 'idle' || isSubmitting || sessionExpired || (pending !== null && !isPendingStage)}
+        disabled={restoreState !== 'idle' || isSubmitting || isStartingQuest || sessionExpired
+          || (pending !== null && !isPendingStage)}
         submitting={isSubmitting && isPendingStage}
         retrying={isPendingStage}
         onSelect={(option) => selectAnswer(stage.id, option)}
@@ -310,7 +328,7 @@ function App() {
       stageHeading.current?.focus()
       focusStage.current = false
     }
-  }, [stageIndex])
+  }, [article, stageIndex])
 
   useEffect(() => {
     const controller = new AbortController()
@@ -355,7 +373,18 @@ function App() {
         <div className="stage-actions">
           <button
             type="button"
-            disabled={showArticleForm || restoreState !== 'idle' || pending !== null || isSubmitting}
+            disabled={showArticleForm || restoreState === 'loading' || isSubmitting || isStartingQuest}
+            onClick={() => {
+              setQuestStartError(null)
+              setShowLibrary(!showLibrary)
+            }}
+          >
+            {showLibrary ? 'Back to quest' : 'Article Library'}
+          </button>
+          <button
+            type="button"
+            disabled={showArticleForm || isStartingQuest || (!showLibrary
+              && (restoreState !== 'idle' || pending !== null || isSubmitting))}
             onClick={() => setShowArticleForm(true)}
           >
             Use my own article
@@ -365,7 +394,8 @@ function App() {
           Reading mode
           <select
             value={mode}
-            disabled={showArticleForm || restoreState !== 'idle' || pending !== null || isSubmitting}
+            disabled={showArticleForm || showLibrary || isStartingQuest
+              || restoreState !== 'idle' || pending !== null || isSubmitting}
             onChange={(event) => setMode(event.currentTarget.value === 'full' ? 'full' : 'guided')}
           >
             <option value="guided">Guided Quest</option>
@@ -376,11 +406,19 @@ function App() {
       {showArticleForm && (
         <main className="quest-content">
           <h1>Start with your own article</h1>
-          <ArticleForm onReady={openGeneratedQuest} onCancel={() => setShowArticleForm(false)} />
+          <ArticleForm onReady={openQuest} onCancel={() => setShowArticleForm(false)} />
         </main>
       )}
-      <main className="quest-content" hidden={showArticleForm}>
+      {showLibrary && !showArticleForm && (
+        <ArticleLibrary
+          starting={isStartingQuest}
+          startError={questStartError}
+          onStart={(id) => void startNewQuest(id)}
+        />
+      )}
+      <main className="quest-content" hidden={showArticleForm || showLibrary}>
         <h1>{title}</h1>
+        {questStartError && !showLibrary && <p role="alert">{questStartError}</p>}
         {restoreState === 'loading' && <p role="status">Restoring your quest…</p>}
         {restoreState === 'error' && (
           <div className="quest-restart">
@@ -410,7 +448,9 @@ function App() {
           <div className="quest-restart">
             <p role="alert">This quest session has expired. Start a new quest to continue.</p>
             <div className="stage-actions">
-              <button type="button" onClick={restartQuest}>Start a new quest</button>
+              <button type="button" disabled={isStartingQuest} onClick={() => void startNewQuest(articleId)}>
+                {isStartingQuest ? 'Opening…' : 'Start a new quest'}
+              </button>
             </div>
           </div>
         )}
@@ -428,7 +468,9 @@ function App() {
                 <h2 id="full-summary">Story complete</h2>
                 <p>You earned {progress.xp} XP.</p>
                 <div className="stage-actions">
-                  <button type="button" onClick={restartQuest}>Start a new quest</button>
+                  <button type="button" disabled={isStartingQuest} onClick={() => void startNewQuest(articleId)}>
+                    {isStartingQuest ? 'Opening…' : 'Play again'}
+                  </button>
                 </div>
               </section>
             )}
@@ -469,13 +511,17 @@ function App() {
             <p>You finished all {stages.length} stages and earned {progress?.xp ?? 0} XP.</p>
             <div className="stage-actions">
               <button type="button" onClick={() => goToStage(stages.length - 1)}>Review last stage</button>
-              <button type="button" onClick={restartQuest}>Start a new quest</button>
+              <button type="button" disabled={isStartingQuest} onClick={() => void startNewQuest(articleId)}>
+                {isStartingQuest ? 'Opening…' : 'Play again'}
+              </button>
             </div>
           </section>
         )}
       </main>
       <footer className="site-footer">
-        {source && !showArticleForm && <p>Adapted from <a href={source.url}>{source.label}</a>.</p>}
+        {source && !showArticleForm && !showLibrary && (
+          <p>Adapted from <a href={source.url}>{source.label}</a>.</p>
+        )}
         <p role="status">{healthMessages[health]}</p>
       </footer>
     </div>

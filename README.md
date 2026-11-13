@@ -28,7 +28,8 @@ npm --prefix frontend run dev
 
 1. Open [Reading Quest](http://127.0.0.1:5173/). Select an answer and click **Check answer**. A correct answer awards 10 XP. Two wrong answers finish the stage with an explanation and 0 XP.
 2. Switch between **Guided Quest** and **Full Article**. Both modes show the same answers, XP, and progress.
-3. Finish all three stages and check the XP total on the summary. Use **Start a new quest** to reset progress.
+3. Finish all three stages and check the XP total on the summary. Use **Play again** to replay the same article from 0 XP.
+4. Open **Article Library** to find the built-in article and previously generated articles. Choose **Read article** to view the full text or **Start quiz** to open a fresh session with the saved questions.
 
 ### Verify saved sessions
 
@@ -36,9 +37,13 @@ Answer one stage, then reload in the same browser. The quest should resume at th
 
 ### Generate a quest
 
-Set `GEMINI_API_KEY` in the backend terminal before starting FastAPI. The default model is `gemini-3.5-flash-lite`. Set `GEMINI_MODEL` to choose a different Gemini model that supports structured output.
+Set `GEMINI_API_KEY` in the backend terminal before starting FastAPI. The default model is `gemini-3.5-flash-lite`. Set `GEMINI_MODEL` to choose a Gemini model that supports structured output and function calling.
 
 On the reading page, select **Use my own article**, paste 300–800 English words, and click **Generate quest**. Gemini receives the article text to generate the questions. Complete a stage and reload to check that the generated quest and its progress resume.
+
+### Verify the tutor
+
+With Gemini configured, start a fresh quest and answer the first question incorrectly. Gemini receives the question's skill and attempt number. In the browser's **Network** panel, open the answer response. `agent_action: "GIVE_HINT"` confirms LangGraph ran the hint tool. `"RETRY"` shows the standard retry prompt. Both actions allow one more attempt.
 
 ### Run backend tests
 
