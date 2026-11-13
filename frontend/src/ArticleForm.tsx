@@ -56,11 +56,13 @@ export function ArticleForm({ onReady, onCancel }: {
         if (!createdSession.current) createdArticle.current = null
         createdSession.current = null
       }
-      setError(
-        cause instanceof QuestApiError
-          ? cause.message
-          : 'Could not load your quest. Check the backend connection and try again.',
-      )
+      if (cause instanceof QuestApiError) {
+        setError(cause.message)
+      } else if (cause instanceof DOMException && cause.name === 'TimeoutError') {
+        setError('The request timed out. Try again in a moment.')
+      } else {
+        setError('Could not load your quest. Check the backend connection and try again.')
+      }
     } finally {
       inFlight.current = false
       setStatus('idle')

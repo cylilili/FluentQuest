@@ -37,8 +37,13 @@ class GeminiProvider:
                 api_key=api_key,
                 vertexai=False,
                 http_options=types.HttpOptions(
-                    timeout=45_000,
-                    retry_options=types.HttpRetryOptions(attempts=1),
+                    timeout=25_000,
+                    retry_options=types.HttpRetryOptions(
+                        attempts=2,
+                        initial_delay=1.0,
+                        max_delay=2.0,
+                        http_status_codes=[503],
+                    ),
                 ),
             ) as client:
                 response = client.models.generate_content(
@@ -63,6 +68,8 @@ class GeminiProvider:
                 raise ProviderUnavailable("The configured Gemini model is unavailable.") from None
             if exc.code == 429:
                 raise ProviderUnavailable("Gemini quota is unavailable. Try again later.") from None
+            if exc.code == 503:
+                raise ProviderUnavailable("Gemini is temporarily unavailable. Try again in a moment.") from None
             raise ProviderUnavailable("Gemini could not generate questions. Try again.") from None
 
         if not response.text:

@@ -10,6 +10,7 @@ from .llm import LLMProvider, ProviderResponseError
 
 OptionId = Literal["A", "B", "C"]
 OPTION_IDS = ("A", "B", "C")
+PUZZLE_BLANK = re.compile(r"_+|\[blank\]", re.IGNORECASE)
 
 
 class ArticleSubmission(BaseModel):
@@ -95,8 +96,12 @@ def generate_article(submission: ArticleSubmission, provider: LLMProvider) -> st
             raise ProviderResponseError("Gemini returned duplicate options. Try again.")
         if " ".join(question.source_quote.split()) not in " ".join(passage.split()):
             raise ProviderResponseError("Gemini returned a quote outside its passage. Try again.")
-        if challenge_id == "sentence-puzzle" and question.prompt.count("_____") != 1:
-            raise ProviderResponseError("Gemini returned an invalid sentence puzzle. Try again.")
+        prompt = question.prompt
+        if challenge_id == "sentence-puzzle":
+            blanks = PUZZLE_BLANK.findall(prompt)
+            if len(blanks) != 1 or blanks[0] == "_":
+                raise ProviderResponseError("Gemini's sentence puzzle needs exactly one blank. Try again.")
+            prompt = PUZZLE_BLANK.sub("_____", prompt)
 
         rows.append({
             "challenge_id": challenge_id,
@@ -104,7 +109,7 @@ def generate_article(submission: ArticleSubmission, provider: LLMProvider) -> st
             "title": f"Part {position + 1}",
             "passage": passage,
             "question_type": question_type,
-            "prompt": question.prompt,
+            "prompt": prompt,
             "options": [
                 {"id": option_id, "text": option}
                 for option_id, option in zip(OPTION_IDS, question.options, strict=True)

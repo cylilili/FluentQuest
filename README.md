@@ -39,3 +39,11 @@ Answer one stage, then reload in the same browser. The quest should resume at th
 Set `GEMINI_API_KEY` in the backend terminal before starting FastAPI. The default model is `gemini-3.5-flash-lite`. Set `GEMINI_MODEL` to choose a different Gemini model that supports structured output.
 
 On the reading page, select **Use my own article**, paste 300–800 English words, and click **Generate quest**. Gemini receives the article text to generate the questions. Complete a stage and reload to check that the generated quest and its progress resume.
+
+### Run backend tests
+
+```sh
+PYTHONPATH=backend .venv/bin/python -m unittest discover -s backend/tests -v
+```
+
+The tests simulate Gemini responses and use a temporary SQLite database.
