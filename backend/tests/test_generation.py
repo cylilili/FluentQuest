@@ -71,6 +71,70 @@ class GenerationTests(unittest.IsolatedAsyncioTestCase):
             httpx2.AsyncClient(transport=httpx2.ASGITransport(app=app), base_url="http://test")
         )
 
+    async def test_learning_progress_counts_only_retries_that_follow_a_hint_in_the_same_quest(self):
+        async def answer(session_id, stage, option, request_id):
+            response = await self.client.post(f"/api/sessions/{session_id}/answers", json={
+                "challenge_id": stage,
+                "selected_option_id": option,
+                "request_id": request_id,
+            })
+            self.assertEqual(response.status_code, 200)
+            return response.json()
+
+        empty = await self.client.get("/api/progress")
+        self.assertEqual(empty.json(), {"skills": []})
+
+        first = (await self.client.post("/api/sessions")).json()["session_id"]
+        second = (await self.client.post("/api/sessions")).json()["session_id"]
+        await answer(first, "the-warning", "A", "first-miss")
+        with patch.object(self.provider, "request_tool_call", return_value=None):
+            await answer(second, "the-warning", "A", "first-miss")
+        await answer(second, "the-warning", "B", "correct-retry")
+        await answer(first, "the-warning", "B", "correct-retry")
+        await answer(first, "the-warning", "B", "correct-retry")
+        await answer(first, "the-hunt", "A", "vocabulary-miss")
+        await answer(first, "the-hunt", "B", "vocabulary-final-miss")
+        await answer(second, "the-hunt", "C", "vocabulary-first-correct")
+        with db.transaction(write=True) as connection:
+            # A pre-tutor result records the grade but has neither an action nor a trace.
+            old_answer = (
+                db.submissions.c.session_id == second,
+                db.submissions.c.request_id == "vocabulary-first-correct",
+            )
+            old_result = connection.scalar(select(db.submissions.c.result).where(*old_answer))
+            del old_result["agent_action"]
+            del old_result["agent_trace"]
+            connection.execute(db.submissions.update().where(*old_answer).values(
+                result=old_result,
+            ))
+
+        response = await self.client.get("/api/progress")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["skills"], [
+            {
+                "skill_tag": "Main Idea",
+                "attempts": 4,
+                "correct_attempts": 2,
+                "first_attempts": 2,
+                "correct_first_attempts": 0,
+                "hints_shown": 1,
+                "retries_after_hint": 1,
+                "correct_retries_after_hint": 1,
+                "simpler_examples_shown": 0,
+            },
+            {
+                "skill_tag": "Vocabulary in Context",
+                "attempts": 3,
+                "correct_attempts": 1,
+                "first_attempts": 2,
+                "correct_first_attempts": 1,
+                "hints_shown": 1,
+                "retries_after_hint": 1,
+                "correct_retries_after_hint": 0,
+                "simpler_examples_shown": 1,
+            },
+        ])
+
     async def test_generated_quest_can_be_played_without_exposing_answer_keys(self):
         response = await self.client.post("/api/articles", json={"text": ARTICLE})
         self.assertEqual(response.status_code, 201)
@@ -106,6 +170,46 @@ class GenerationTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(saved["xp"], 30)
         self.assertEqual(saved["answers"][-1]["agent_action"], "COMPLETE")
         self.assertEqual(self.provider.tool_calls, 0)
+
+    async def test_past_quests_change_the_hint_for_the_same_new_article(self):
+        created = await self.client.post("/api/articles", json={"text": ARTICLE})
+        self.assertEqual(created.status_code, 201)
+
+        async def miss_first_question(article_id, challenge_id):
+            session = await self.client.post("/api/sessions", json={"article_id": article_id})
+            self.assertEqual(session.status_code, 201)
+            session_id = session.json()["session_id"]
+            response = await self.client.post(f"/api/sessions/{session_id}/answers", json={
+                "challenge_id": challenge_id,
+                "selected_option_id": "A",
+                "request_id": "first-attempt",
+            })
+            self.assertEqual(response.status_code, 200)
+            return response.json()
+
+        article_id = created.json()["article_id"]
+        baseline = await miss_first_question(article_id, "main-idea")
+        trace = baseline["agent_trace"]
+        self.assertEqual(trace["skill_history"], {"first_attempts": 0, "incorrect_first_attempts": 0})
+        self.assertEqual(trace["hint_level"], "standard")
+
+        previous = await miss_first_question(db.SAMPLE_ARTICLE_ID, "the-warning")
+        trace = previous["agent_trace"]
+        self.assertEqual(trace["skill_history"], {"first_attempts": 1, "incorrect_first_attempts": 1})
+        self.assertEqual(trace["hint_level"], "standard")
+
+        personalized = await miss_first_question(article_id, "main-idea")
+        trace = personalized["agent_trace"]
+        self.assertEqual(trace["skill_history"], {"first_attempts": 2, "incorrect_first_attempts": 2})
+        self.assertEqual(trace["hint_level"], "guided")
+        self.assertIn("Find two details", personalized["feedback"])
+        self.assertNotEqual(personalized["feedback"], baseline["feedback"])
+        self.assertTrue(personalized["retry_allowed"])
+        self.assertEqual(personalized["xp"], 0)
+
+        restored = await self.client.get(f"/api/sessions/{personalized['session_id']}")
+        self.assertEqual(restored.status_code, 200)
+        self.assertEqual(restored.json()["answers"][0]["agent_trace"], trace)
 
     async def test_tutor_feedback_is_saved_and_replayed_with_the_answer(self):
         session = (await self.client.post("/api/sessions")).json()

@@ -8,6 +8,8 @@ from langgraph.runtime import Runtime
 
 from .llm import LLMProvider, ProviderResponseError, ProviderTimeout, ProviderUnavailable
 from .tutor import (
+    HintLevel,
+    SkillHistory,
     TutorAction,
     TutorReason,
     TutorState,
@@ -25,6 +27,20 @@ HINTS = {
     "Main Idea": "Look for the idea that connects the details across the whole passage.",
     "Vocabulary in Context": "Read the sentences around the expression for clues to its meaning.",
     "Sentence Puzzle": "Read the words before and after the blank, then try each option in place.",
+}
+GUIDED_HINTS = {
+    "Main Idea": (
+        "Find two details that point to the same message. "
+        "Then rule out options that describe only one detail or add an idea the passage never mentions."
+    ),
+    "Vocabulary in Context": (
+        "Read the sentence before and after the unfamiliar expression. "
+        "Look for a clue such as a contrast or an example, then replace the expression with each option."
+    ),
+    "Sentence Puzzle": (
+        "Decide what the blank needs, such as a verb or a word linking two ideas. "
+        "Then read the whole sentence with each option and check both meaning and grammar."
+    ),
 }
 SIMPLER_EXAMPLES = {
     "Main Idea": (
@@ -44,12 +60,14 @@ SIMPLER_EXAMPLES = {
 
 class TutorGraphState(TypedDict):
     answer: TutorState
+    skill_history: SkillHistory | None
     action: NotRequired[TutorAction]
     feedback: NotRequired[str]
     reason: NotRequired[TutorReason]
     offered_tool: NotRequired[TutorTool]
     requested_tool: NotRequired[TutorTool | None]
     executed_tool: NotRequired[TutorTool]
+    hint_level: NotRequired[HintLevel]
 
 
 @dataclass(frozen=True)
@@ -141,10 +159,20 @@ def choose_action(state: TutorGraphState, runtime: Runtime[TutorContext]) -> dic
 
 
 def give_hint(state: TutorGraphState) -> dict:
+    skill = state["answer"]["skill_tag"]
+    history = state["skill_history"]
+    if history is not None and history.needs_guidance() and skill in GUIDED_HINTS:
+        return {
+            "executed_tool": HINT_TOOL,
+            "hint_level": "guided",
+            "feedback": GUIDED_HINTS[skill],
+        }
+
     return {
         "executed_tool": HINT_TOOL,
+        "hint_level": "standard",
         "feedback": HINTS.get(
-            state["answer"]["skill_tag"],
+            skill,
             "Reread the passage and look for a detail that supports your choice.",
         ),
     }
@@ -178,8 +206,13 @@ tutor_graph = (
 )
 
 
-def run_tutor(answer: TutorState, provider: LLMProvider) -> TutorDecision:
-    result = tutor_graph.invoke({"answer": answer}, context=TutorContext(provider))
+def run_tutor(
+    answer: TutorState, provider: LLMProvider, *, skill_history: SkillHistory | None = None
+) -> TutorDecision:
+    result = tutor_graph.invoke(
+        {"answer": answer, "skill_history": skill_history},
+        context=TutorContext(provider),
+    )
     executed_tool = result.get("executed_tool")
     nodes = ["choose_action"]
     if executed_tool is not None:
@@ -191,5 +224,7 @@ def run_tutor(answer: TutorState, provider: LLMProvider) -> TutorDecision:
         requested_tool=result.get("requested_tool"),
         reason=result["reason"],
         action=result["action"],
+        skill_history=skill_history,
+        hint_level=result.get("hint_level"),
     )
     return TutorDecision(trace=trace, feedback=result.get("feedback"))

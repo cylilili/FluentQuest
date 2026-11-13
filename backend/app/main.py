@@ -7,6 +7,7 @@ from pydantic import BaseModel
 
 from .db import SAMPLE_ARTICLE_ID, initialize_database
 from .generation import ArticleSubmission, generate_article
+from .learning import LearningProgress, get_learning_progress
 from .llm import (
     LLMProvider,
     ProviderResponseError,
@@ -49,6 +50,11 @@ app = FastAPI(title="Reading Quest", lifespan=lifespan)
 @app.get("/health")
 def health() -> dict[str, str]:
     return {"status": "ok"}
+
+
+@app.get("/api/progress")
+def learning_progress() -> LearningProgress:
+    return get_learning_progress()
 
 
 @app.post("/api/sessions", status_code=status.HTTP_201_CREATED)

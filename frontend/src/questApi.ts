@@ -19,6 +19,18 @@ export type SessionProgress = {
   session_completed: boolean
 }
 
+export type LearningProgress = {
+  skills: {
+    skill_tag: string
+    first_attempts: number
+    correct_first_attempts: number
+    hints_shown: number
+    retries_after_hint: number
+    correct_retries_after_hint: number
+    simpler_examples_shown: number
+  }[]
+}
+
 export type AnswerSubmission = {
   challenge_id: string
   selected_option_id: OptionId
@@ -85,6 +97,10 @@ export function createArticle(text: string, title: string) {
 
 export function listArticles() {
   return request<ArticleListItem[]>('/api/articles', { cache: 'no-store' })
+}
+
+export function getLearningProgress() {
+  return request<LearningProgress>('/api/progress', { cache: 'no-store' })
 }
 
 export function getArticle(articleId: string) {

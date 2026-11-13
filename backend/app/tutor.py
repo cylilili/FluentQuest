@@ -26,6 +26,7 @@ class TutorState(TypedDict):
 
 
 TutorTool = Literal["give_hint", "show_simpler_example"]
+HintLevel = Literal["standard", "guided"]
 TutorReason = Literal[
     "correct_answer",
     "no_available_tool",
@@ -38,6 +39,17 @@ TutorReason = Literal[
 ]
 
 
+class SkillHistory(BaseModel):
+    first_attempts: int
+    incorrect_first_attempts: int
+
+    def needs_guidance(self) -> bool:
+        return (
+            self.incorrect_first_attempts >= 2
+            and self.incorrect_first_attempts * 2 >= self.first_attempts
+        )
+
+
 class TutorTrace(BaseModel):
     input_state: TutorState
     nodes: list[Literal["choose_action", "give_hint", "show_simpler_example"]]
@@ -46,6 +58,8 @@ class TutorTrace(BaseModel):
     reason: TutorReason
     action: TutorAction
     applied: bool = True
+    skill_history: SkillHistory | None = None
+    hint_level: HintLevel | None = None
 
 
 def allowed_tutor_actions(state: TutorState) -> tuple[TutorAction, ...]:

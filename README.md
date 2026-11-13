@@ -32,6 +32,7 @@ Open [Reading Quest](http://127.0.0.1:5173/). The built-in quest works without a
 2. Switch between **Guided Quest** and **Full Article**. Both modes show the same answers, XP, and progress.
 3. Finish all three stages and check the XP total on the summary. Use **Play again** to replay the same article from 0 XP.
 4. Open **Article Library** to find the built-in article and previously generated articles. Choose **Read article** to view the full text or **Start quiz** to open a fresh session with the saved questions.
+5. Open **Learning Summary** to see first-try results and tutor feedback counts by skill across saved sessions. Choose **Back to quest** to return to your current session.
 
 ### Verify saved sessions
 
@@ -52,6 +53,8 @@ With Gemini configured, start a fresh quest and answer the first question incorr
 - `action` shows the graph's decision. If `applied` is false, another submission changed the state while the graph ran. The top-level `agent_action` shows the saved action.
 
 Submit another wrong answer to check the simpler example. The session response also includes saved traces. Answers recorded before tracing show `agent_trace: null`.
+
+When the tutor gives a hint, `hint_level` is `guided` if at least two first attempts for that skill were wrong in other sessions and those misses make up at least half of the first attempts. Otherwise the hint is `standard`. The trace includes the counts in `skill_history`.
 
 ### Run backend tests
 

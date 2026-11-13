@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { createRoot } from 'react-dom/client'
 import { ArticleForm } from './ArticleForm'
 import { ArticleLibrary } from './ArticleLibrary'
+import { LearningSummary } from './LearningSummary'
 import {
   getArticle,
   QuestApiError,
@@ -105,7 +106,7 @@ function App() {
   const [progress, setProgress] = useState<SessionProgress | null>(null)
   const [article, setArticle] = useState<SessionSnapshot['article'] | null>(null)
   const [showArticleForm, setShowArticleForm] = useState(false)
-  const [showLibrary, setShowLibrary] = useState(false)
+  const [view, setView] = useState<'quest' | 'library' | 'summary'>('quest')
   const [isStartingQuest, setIsStartingQuest] = useState(false)
   const [questStartError, setQuestStartError] = useState<string | null>(null)
   const [sessionToRestore, setSessionToRestore] = useState(readSavedSession)
@@ -127,6 +128,8 @@ function App() {
   const { id: articleId, title, source, stages } = article ?? sampleQuest
   const currentStage = stages[stageIndex]
   const isLastStage = stageIndex === stages.length - 1
+  const navigationDisabled = showArticleForm || restoreState === 'loading' || isSubmitting || isStartingQuest
+  const showingQuest = view === 'quest' && !showArticleForm
 
   function goToStage(index: number) {
     focusStage.current = true
@@ -218,7 +221,7 @@ function App() {
     setMode('guided')
     saveSession({ sessionId: snapshot.session_id, pending: null })
     setShowArticleForm(false)
-    setShowLibrary(false)
+    setView('quest')
     setQuestStartError(null)
   }
 
@@ -373,17 +376,24 @@ function App() {
         <div className="stage-actions">
           <button
             type="button"
-            disabled={showArticleForm || restoreState === 'loading' || isSubmitting || isStartingQuest}
+            disabled={navigationDisabled}
             onClick={() => {
               setQuestStartError(null)
-              setShowLibrary(!showLibrary)
+              setView(view === 'library' ? 'quest' : 'library')
             }}
           >
-            {showLibrary ? 'Back to quest' : 'Article Library'}
+            {view === 'library' ? 'Back to quest' : 'Article Library'}
           </button>
           <button
             type="button"
-            disabled={showArticleForm || isStartingQuest || (!showLibrary
+            disabled={navigationDisabled || view === 'summary'}
+            onClick={() => setView('summary')}
+          >
+            Learning Summary
+          </button>
+          <button
+            type="button"
+            disabled={showArticleForm || isStartingQuest || (view === 'quest'
               && (restoreState !== 'idle' || pending !== null || isSubmitting))}
             onClick={() => setShowArticleForm(true)}
           >
@@ -394,7 +404,7 @@ function App() {
           Reading mode
           <select
             value={mode}
-            disabled={showArticleForm || showLibrary || isStartingQuest
+            disabled={!showingQuest || isStartingQuest
               || restoreState !== 'idle' || pending !== null || isSubmitting}
             onChange={(event) => setMode(event.currentTarget.value === 'full' ? 'full' : 'guided')}
           >
@@ -409,16 +419,19 @@ function App() {
           <ArticleForm onReady={openQuest} onCancel={() => setShowArticleForm(false)} />
         </main>
       )}
-      {showLibrary && !showArticleForm && (
+      {view === 'library' && !showArticleForm && (
         <ArticleLibrary
           starting={isStartingQuest}
           startError={questStartError}
           onStart={(id) => void startNewQuest(id)}
         />
       )}
-      <main className="quest-content" hidden={showArticleForm || showLibrary}>
+      {view === 'summary' && !showArticleForm && (
+        <LearningSummary onBack={() => setView('quest')} />
+      )}
+      <main className="quest-content" hidden={!showingQuest}>
         <h1>{title}</h1>
-        {questStartError && !showLibrary && <p role="alert">{questStartError}</p>}
+        {questStartError && showingQuest && <p role="alert">{questStartError}</p>}
         {restoreState === 'loading' && <p role="status">Restoring your quest…</p>}
         {restoreState === 'error' && (
           <div className="quest-restart">
@@ -519,7 +532,7 @@ function App() {
         )}
       </main>
       <footer className="site-footer">
-        {source && !showArticleForm && !showLibrary && (
+        {source && showingQuest && (
           <p>Adapted from <a href={source.url}>{source.label}</a>.</p>
         )}
         <p role="status">{healthMessages[health]}</p>

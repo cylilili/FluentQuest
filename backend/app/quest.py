@@ -7,6 +7,7 @@ from sqlalchemy import func, select
 from sqlalchemy.engine import Connection
 
 from .db import SAMPLE_ARTICLE_ID, articles, challenges, sessions, submissions, transaction
+from .learning import load_skill_history
 from .llm import LLMProvider
 from .tutor import TutorAction, TutorState, TutorTrace, resolve_tutor_action
 from .tutor_graph import run_tutor
@@ -298,8 +299,13 @@ def submit_answer(
         if previous is not None:
             return previous
         _, state, _ = grade_answer(connection, session_id, submission)
+        skill_history = (
+            load_skill_history(connection, session_id=state["session_id"], skill_tag=state["skill_tag"])
+            if state["retry_allowed"]
+            else None
+        )
 
-    decision = run_tutor(state, provider)
+    decision = run_tutor(state, provider, skill_history=skill_history)
 
     with transaction(write=True) as connection:
         previous = load_saved_answer(connection, session_id, submission)
