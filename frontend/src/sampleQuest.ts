@@ -1,3 +1,14 @@
+import type { OptionId } from './questApi'
+
+type Option = { id: OptionId; text: string }
+
+export type Stage = {
+  id: string
+  title: string
+  passage: string
+  question: { title: string; prompt: string; options: Option[] }
+}
+
 export const sampleQuest = {
   title: 'Venus and Adonis',
   source: {
@@ -13,9 +24,9 @@ export const sampleQuest = {
         title: 'Main Idea',
         prompt: 'Which statement best sums up this part of the story?',
         options: [
-          'Venus asks Adonis to leave the woods and travel to Cyprus with her.',
-          'Venus enjoys hunting with Adonis and urges him to avoid dangerous animals.',
-          'Venus wants Adonis to prove his courage by taking on more dangerous animals.',
+          { id: 'A', text: 'Venus asks Adonis to leave the woods and travel to Cyprus with her.' },
+          { id: 'B', text: 'Venus enjoys hunting with Adonis and urges him to avoid dangerous animals.' },
+          { id: 'C', text: 'Venus wants Adonis to prove his courage by taking on more dangerous animals.' },
         ],
       },
     },
@@ -26,7 +37,11 @@ export const sampleQuest = {
       question: {
         title: 'Vocabulary in Context',
         prompt: 'In the sentence “Adonis did not heed her warning,” what does “heed” mean?',
-        options: ['Repeat it to someone else', 'Ask for more details about it', 'Take it seriously and act on it'],
+        options: [
+          { id: 'A', text: 'Repeat it to someone else' },
+          { id: 'B', text: 'Ask for more details about it' },
+          { id: 'C', text: 'Take it seriously and act on it' },
+        ],
       },
     },
     {
@@ -36,8 +51,12 @@ export const sampleQuest = {
       question: {
         title: 'Sentence Puzzle',
         prompt: 'Venus turned her chariot around _____ she heard Adonis cry out.',
-        options: ['because', 'unless', 'although'],
+        options: [
+          { id: 'A', text: 'because' },
+          { id: 'B', text: 'unless' },
+          { id: 'C', text: 'although' },
+        ],
       },
     },
-  ],
+  ] satisfies Stage[],
 }

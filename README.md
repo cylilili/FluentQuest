@@ -26,6 +26,6 @@ npm --prefix frontend run dev
 
 ## Verify
 
-1. Open [Reading Quest](http://127.0.0.1:5173/). In **Guided Quest**, select one answer per stage and continue until the story ends.
-2. Switch to **Full Article** to see the complete story and all three questions. Switch back to check that your place and selections are still there.
-3. With FastAPI running, the footer should show `Backend status: ok` and `/health` should return HTTP `200` in DevTools.
+1. Open [Reading Quest](http://127.0.0.1:5173/). Select an answer and click **Check answer**. A correct answer awards 10 XP. Two wrong answers finish the stage with an explanation and 0 XP.
+2. Switch between **Guided Quest** and **Full Article**. Both modes show the same answers, XP, and progress.
+3. Finish all three stages and check the XP total on the summary. Use **Start a new quest** to reset progress.

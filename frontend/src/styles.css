@@ -105,14 +105,36 @@ body {
   text-underline-offset: 0.2em;
 }
 
+.quest-progress {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  align-items: center;
+  gap: 0.25rem 1rem;
+  margin-bottom: 1.5rem;
+}
+
+.quest-progress progress {
+  width: 100%;
+  accent-color: #315d42;
+}
+
+.quest-restart {
+  margin-bottom: 1.5rem;
+}
+
 .challenge {
+  margin-bottom: 1.75rem;
+}
+
+.challenge-options {
   min-inline-size: 0;
-  margin: 0 0 1.75rem;
+  margin: 0 0 0.75rem;
   padding: 0;
   border: 0;
 }
 
-.challenge legend {
+.challenge-options legend {
   padding: 0;
   margin-bottom: 0.625rem;
 }
@@ -149,6 +171,10 @@ body {
 .challenge-option:has(:focus-visible) {
   outline: 2px solid #315d42;
   outline-offset: 2px;
+}
+
+.challenge-options:disabled .challenge-option {
+  cursor: default;
 }
 
 .challenge-option input {
