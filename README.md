@@ -1,6 +1,6 @@
 # Reading Quest
 
-Reading Quest is an English reading game in development. The current page checks the connection between React and FastAPI.
+Reading Quest is an English reading game in development. Read *Venus and Adonis* one passage at a time, with a question after each passage. Use the **Reading mode** menu to switch to the full article.
 
 ## Setup
 
@@ -26,6 +26,6 @@ npm --prefix frontend run dev
 
 ## Verify
 
-1. Open [Reading Quest](http://127.0.0.1:5173/) and check for `Backend status: ok`.
-2. Reload with DevTools open. In **Network**, `/health` should return HTTP `200` and `{"status":"ok"}`.
-3. Stop FastAPI and reload to see the connection error. Restart FastAPI and reload to confirm recovery.
+1. Open [Reading Quest](http://127.0.0.1:5173/). In **Guided Quest**, select one answer per stage and continue until the story ends.
+2. Switch to **Full Article** to see the complete story and all three questions. Switch back to check that your place and selections are still there.
+3. With FastAPI running, the footer should show `Backend status: ok` and `/health` should return HTTP `200` in DevTools.
