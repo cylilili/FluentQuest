@@ -1,6 +1,6 @@
 # Reading Quest
 
-Reading Quest is an English reading game in development. Read *Venus and Adonis* one passage at a time, with a question after each passage. Use the **Reading mode** menu to switch to the full article.
+Reading Quest is an English reading game in development. Try *Venus and Adonis* or generate three challenges from your own article. Use the **Reading mode** menu to switch to the full article.
 
 ## Setup
 
@@ -33,3 +33,9 @@ npm --prefix frontend run dev
 ### Verify saved sessions
 
 Answer one stage, then reload in the same browser. The quest should resume at the first unfinished stage with the same XP. Restart FastAPI and reload again to check persistence in `backend/data/reading_quest.sqlite3`.
+
+### Generate a quest
+
+Set `GEMINI_API_KEY` in the backend terminal before starting FastAPI. The default model is `gemini-3.5-flash-lite`. Set `GEMINI_MODEL` to choose a different Gemini model that supports structured output.
+
+On the reading page, select **Use my own article**, paste 300–800 English words, and click **Generate quest**. Gemini receives the article text to generate the questions. Complete a stage and reload to check that the generated quest and its progress resume.

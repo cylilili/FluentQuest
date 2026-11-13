@@ -1,9 +1,19 @@
 from contextlib import asynccontextmanager
+from typing import Annotated
 from uuid import UUID
 
-from fastapi import FastAPI, status
+from fastapi import Depends, FastAPI, HTTPException, status
+from pydantic import BaseModel
 
-from .db import initialize_database
+from .db import SAMPLE_ARTICLE_ID, initialize_database
+from .generation import ArticleSubmission, generate_article
+from .llm import (
+    LLMProvider,
+    ProviderResponseError,
+    ProviderTimeout,
+    ProviderUnavailable,
+    get_llm_provider,
+)
 from .quest import (
     AnswerResult,
     AnswerSubmission,
@@ -13,6 +23,14 @@ from .quest import (
     get_session,
     submit_answer,
 )
+
+
+class ArticleCreated(BaseModel):
+    article_id: str
+
+
+class SessionStart(BaseModel):
+    article_id: str = SAMPLE_ARTICLE_ID
 
 
 @asynccontextmanager
@@ -30,8 +48,24 @@ def health() -> dict[str, str]:
 
 
 @app.post("/api/sessions", status_code=status.HTTP_201_CREATED)
-def start_session() -> SessionProgress:
-    return create_session()
+def start_session(submission: SessionStart | None = None) -> SessionProgress:
+    return create_session(submission.article_id if submission else SAMPLE_ARTICLE_ID)
+
+
+@app.post("/api/articles", status_code=status.HTTP_201_CREATED)
+def create_article(
+    submission: ArticleSubmission,
+    provider: Annotated[LLMProvider, Depends(get_llm_provider)],
+) -> ArticleCreated:
+    try:
+        article_id = generate_article(submission, provider)
+    except ProviderTimeout as exc:
+        raise HTTPException(status_code=504, detail=str(exc)) from exc
+    except ProviderUnavailable as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except ProviderResponseError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+    return ArticleCreated(article_id=article_id)
 
 
 @app.get("/api/sessions/{session_id}")

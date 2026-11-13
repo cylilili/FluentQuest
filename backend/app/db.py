@@ -15,6 +15,7 @@ from sqlalchemy import (
     UniqueConstraint,
     create_engine,
     event,
+    inspect,
 )
 from sqlalchemy.dialects.sqlite import insert
 from sqlalchemy.engine import URL
@@ -58,6 +59,7 @@ challenges = Table(
     Column("options", JSON, nullable=False),
     Column("correct_option_id", String, nullable=False),
     Column("explanation", Text, nullable=False),
+    Column("source_quote", Text),
     UniqueConstraint("article_id", "challenge_id"),
     UniqueConstraint("article_id", "position"),
 )
@@ -98,6 +100,10 @@ def initialize_database() -> None:
 
     with transaction(write=True) as connection:
         metadata.create_all(connection)
+        columns = inspect(connection).get_columns("challenges")
+        if not any(column["name"] == "source_quote" for column in columns):
+            connection.exec_driver_sql("ALTER TABLE challenges ADD COLUMN source_quote TEXT")
+
         # Keep existing sessions tied to the same version of the sample questions.
         seeded = connection.execute(
             insert(articles)
@@ -124,4 +130,12 @@ def initialize_database() -> None:
                 }
                 for position, stage in enumerate(sample["stages"])
             ],
+        )
+
+
+def save_generated_article(article_id: str, title: str, question_rows: list[dict]) -> None:
+    with transaction(write=True) as connection:
+        connection.execute(articles.insert().values(id=article_id, title=title, source=None))
+        connection.execute(
+            challenges.insert(), [{**row, "article_id": article_id} for row in question_rows]
         )

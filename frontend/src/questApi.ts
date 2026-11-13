@@ -39,7 +39,7 @@ export type SessionSnapshot = SessionProgress & {
   article: {
     id: string
     title: string
-    source: { label: string; url: string }
+    source: { label: string; url: string } | null
     stages: Stage[]
   }
   answers: (AnswerResult & { selected_option_id: OptionId; request_id: string })[]
@@ -51,10 +51,10 @@ export class QuestApiError extends Error {
   }
 }
 
-async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
+async function request<T>(path: string, options: RequestInit = {}, timeoutMs = 10_000): Promise<T> {
   const response = await fetch(path, {
     ...options,
-    signal: AbortSignal.timeout(10_000),
+    signal: AbortSignal.timeout(timeoutMs),
   })
 
   if (!response.ok) {
@@ -66,8 +66,22 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   return response.json()
 }
 
-export function startSession() {
-  return request<SessionProgress>('/api/sessions', { method: 'POST' })
+export function createArticle(text: string, title: string) {
+  return request<{ article_id: string }>('/api/articles', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ text, ...(title ? { title } : {}) }),
+  }, 60_000)
+}
+
+export function startSession(articleId?: string) {
+  return request<SessionProgress>('/api/sessions', {
+    method: 'POST',
+    ...(articleId && {
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ article_id: articleId }),
+    }),
+  })
 }
 
 export function restoreSession(sessionId: string) {

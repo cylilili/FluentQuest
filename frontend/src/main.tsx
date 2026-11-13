@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { createRoot } from 'react-dom/client'
+import { ArticleForm } from './ArticleForm'
 import {
   QuestApiError,
   restoreSession,
@@ -101,6 +102,7 @@ function App() {
   const [results, setResults] = useState<Partial<Record<string, AnswerResult>>>({})
   const [progress, setProgress] = useState<SessionProgress | null>(null)
   const [article, setArticle] = useState<SessionSnapshot['article'] | null>(null)
+  const [showArticleForm, setShowArticleForm] = useState(false)
   const [sessionToRestore, setSessionToRestore] = useState(readSavedSession)
   const [restoreState, setRestoreState] = useState<'idle' | 'loading' | 'error'>(
     sessionToRestore ? 'loading' : 'idle',
@@ -209,6 +211,15 @@ function App() {
     setSubmissionError(null)
     setSessionExpired(false)
     if (stageIndex !== 0) goToStage(0)
+  }
+
+  function openGeneratedQuest(snapshot: SessionSnapshot) {
+    restartQuest()
+    setArticle(snapshot.article)
+    setProgress(snapshot)
+    setMode('guided')
+    saveSession({ sessionId: snapshot.session_id, pending: null })
+    setShowArticleForm(false)
   }
 
   function renderQuestion(stage: Stage) {
@@ -341,11 +352,20 @@ function App() {
     <div className="page">
       <header className="site-header">
         <span>Reading Quest</span>
+        <div className="stage-actions">
+          <button
+            type="button"
+            disabled={showArticleForm || restoreState !== 'idle' || pending !== null || isSubmitting}
+            onClick={() => setShowArticleForm(true)}
+          >
+            Use my own article
+          </button>
+        </div>
         <label className="mode-picker">
           Reading mode
           <select
             value={mode}
-            disabled={restoreState !== 'idle' || pending !== null || isSubmitting}
+            disabled={showArticleForm || restoreState !== 'idle' || pending !== null || isSubmitting}
             onChange={(event) => setMode(event.currentTarget.value === 'full' ? 'full' : 'guided')}
           >
             <option value="guided">Guided Quest</option>
@@ -353,7 +373,13 @@ function App() {
           </select>
         </label>
       </header>
-      <main className="quest-content">
+      {showArticleForm && (
+        <main className="quest-content">
+          <h1>Start with your own article</h1>
+          <ArticleForm onReady={openGeneratedQuest} onCancel={() => setShowArticleForm(false)} />
+        </main>
+      )}
+      <main className="quest-content" hidden={showArticleForm}>
         <h1>{title}</h1>
         {restoreState === 'loading' && <p role="status">Restoring your quest…</p>}
         {restoreState === 'error' && (
@@ -449,7 +475,7 @@ function App() {
         )}
       </main>
       <footer className="site-footer">
-        <p>Adapted from <a href={source.url}>{source.label}</a>.</p>
+        {source && !showArticleForm && <p>Adapted from <a href={source.url}>{source.label}</a>.</p>}
         <p role="status">{healthMessages[health]}</p>
       </footer>
     </div>

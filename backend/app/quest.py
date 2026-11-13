@@ -70,7 +70,7 @@ class ArticleSource(BaseModel):
 class QuestArticle(BaseModel):
     id: str
     title: str
-    source: ArticleSource
+    source: ArticleSource | None
     stages: list[Stage]
 
 
@@ -106,15 +106,17 @@ def make_progress(
     )
 
 
-def create_session() -> SessionProgress:
+def create_session(article_id: str = SAMPLE_ARTICLE_ID) -> SessionProgress:
     session_id = uuid4()
     with transaction(write=True) as connection:
+        total_stages = count_stages(connection, article_id)
+        if total_stages == 0:
+            raise HTTPException(status_code=404, detail="Quest article not found")
         connection.execute(
             sessions.insert().values(
-                id=str(session_id), article_id=SAMPLE_ARTICLE_ID, xp=0, completed_stages=0
+                id=str(session_id), article_id=article_id, xp=0, completed_stages=0
             )
         )
-        total_stages = count_stages(connection, SAMPLE_ARTICLE_ID)
     return make_progress(session_id, 0, 0, total_stages)
 
 

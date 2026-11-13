@@ -65,6 +65,35 @@ body {
   background: #fffdf8;
 }
 
+.article-form {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.article-form label {
+  font-weight: 600;
+}
+
+.article-form input,
+.article-form textarea {
+  box-sizing: border-box;
+  width: 100%;
+  padding: 0.65rem 0.75rem;
+  border: 1px solid #52765e;
+  border-radius: 0.5rem;
+  color: inherit;
+  background: #fffdf8;
+  font: inherit;
+}
+
+.article-form textarea {
+  resize: vertical;
+}
+
+.article-form p {
+  margin: 0;
+}
+
 .stage-position {
   margin: 0 0 0.5rem;
   color: #385d48;
@@ -93,6 +122,8 @@ body {
   font-family: 'Crimson Text', Georgia, serif;
   font-size: 1.15rem;
   line-height: 1.7;
+  white-space: pre-line;
+  overflow-wrap: anywhere;
 }
 
 .site-footer {
